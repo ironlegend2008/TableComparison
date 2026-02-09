@@ -4,12 +4,34 @@ import "jspdf-autotable";
 import "./App.css";
 
 function parseCSV(text) {
-  const lines = text.replace(/\r\n/g, "\n").split("\n").filter(l => l.trim().length > 0);
+  const lines = text.replace(/\r\n/g, "\n").split("\n").filter(l => l.trim());
   if (lines.length === 0) return { headers: [], rows: [] };
 
-  const headers = lines[0].split(",").map(h => h.trim());
+  // ✅ PROPER CSV PARSER - handles quotes + commas
+  const parseLine = (line) => {
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+
+      if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === ',' && !inQuotes) {
+        result.push(current.trim().replace(/^"|"$/g, '')); // Remove quotes
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    result.push(current.trim().replace(/^"|"$/g, '')); // Last field
+    return result;
+  };
+
+  const headers = parseLine(lines[0]);
   const rows = lines.slice(1).map(line => {
-    const cols = line.split(",");
+    const cols = parseLine(line);
     const obj = {};
     headers.forEach((h, idx) => {
       obj[h] = (cols[idx] ?? "").trim();
@@ -19,6 +41,7 @@ function parseCSV(text) {
 
   return { headers, rows };
 }
+
 
 function computeColumnDifferences(headersA, headersB) {
   const onlyA = headersA.filter(h => !headersB.includes(h));
