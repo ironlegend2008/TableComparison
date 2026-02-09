@@ -299,8 +299,15 @@ function App() {
       document.body.appendChild(container);
 
       // Clone with full data visible
+      // Clone with full data visible
       const appContent = document.querySelector('.app-container');
       const clone = appContent.cloneNode(true);
+
+      // FIXED: Force dropdown to show selected PK value
+      const pkSelect = clone.querySelector('select');
+      if (pkSelect && pk) {
+        pkSelect.value = pk;
+      }
 
       // CRITICAL: Force all tables to show full content
       clone.querySelectorAll('.table-wrapper').forEach(wrapper => {
