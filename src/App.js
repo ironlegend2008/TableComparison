@@ -179,6 +179,7 @@ function SortableColumnDiffTable({ columnName, pk, diffRows }) {
 
 function SortableMissingTable({ title, rows, pk, headers }) {
   const [sortConfig, setSortConfig] = useState({ column: pk, direction: "asc" });
+  const [scrollLeft, setScrollLeft] = useState(0);
 
   const sortedRows = useMemo(() => {
     const arr = [...rows];
@@ -195,55 +196,72 @@ function SortableMissingTable({ title, rows, pk, headers }) {
   }, [rows, sortConfig]);
 
   const handleSort = (col) => {
-    setSortConfig(prev => {
-      if (prev.column === col) {
-        return { column: col, direction: prev.direction === "asc" ? "desc" : "asc" };
-      }
-      return { column: col, direction: "asc" };
-    });
+    setSortConfig(prev => ({
+      column: col,
+      direction: prev.column === col && prev.direction === "asc" ? "desc" : "asc"
+    }));
   };
 
-  const sortIndicator = (col) => {
-    if (sortConfig.column !== col) return "";
-    return sortConfig.direction === "asc" ? " ↑" : " ↓";
-  };
+  const sortIndicator = (col) => sortConfig.column === col
+    ? ` ${sortConfig.direction === "asc" ? "↑" : "↓"}` : "";
 
   if (rows.length === 0) return null;
 
-  const displayHeaders = headers.slice(0, 6);
-
   return (
     <div className="table-container">
-      <div className="table-header">{title} ({rows.length} rows)</div>
-      <div className="table-wrapper">
-        <table>
-          <thead>
-            <tr>
-              {displayHeaders.map(col => (
-                <th
-                  key={col}
-                  className="sortable"
-                  onClick={() => handleSort(col)}
-                >
-                  {col}{sortIndicator(col)}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {sortedRows.map((row, idx) => (
-              <tr key={idx}>
-                {displayHeaders.map(col => (
-                  <td key={col}>{row[col] || ''}</td>
+      <div className="table-header">
+        {title} ({rows.length.toLocaleString()} rows)
+        <span className="column-count">{headers.length} columns</span>
+      </div>
+
+      {/* 👇 HORIZONTAL + VERTICAL SCROLL */}
+      <div className="table-scroll-wrapper">
+        <div className="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                {headers.map(col => (
+                  <th
+                    key={col}
+                    className="sortable"
+                    onClick={() => handleSort(col)}
+                    style={{ minWidth: Math.max(120, col.length * 10 + 40) + 'px' }}
+                  >
+                    {col}{sortIndicator(col)}
+                  </th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {sortedRows.slice(0, 100).map((row, idx) => (  // Limit to 100 rows
+                <tr key={idx}>
+                  {headers.map(col => (
+                    <td key={col} style={{ minWidth: '120px' }}>
+                      {row[col] || '(empty)'}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+              {sortedRows.length > 100 && (
+                <tr className="summary-row">
+                  <td colSpan={headers.length} style={{ textAlign: 'center', padding: '20px' }}>
+                    +{sortedRows.length - 100} more rows...
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* 👇 Horizontal scroll indicator */}
+        <div className="scroll-indicator">
+          {headers.length > 8 && `← Scroll horizontally to see all ${headers.length} columns →`}
+        </div>
       </div>
     </div>
   );
 }
+
 
 function App() {
   const [fileA, setFileA] = useState(null);

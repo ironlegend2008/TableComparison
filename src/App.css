@@ -387,3 +387,72 @@ td {
     max-height: 300px;
   }
 }
+
+/* Horizontal + Vertical Scroll */
+.table-scroll-wrapper {
+  position: relative;
+  border: 1px solid #e1e4e8;
+  border-radius: 0 0 6px 6px;
+  overflow: hidden;
+}
+
+.table-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 15px;
+  background: #f6f8fa;
+  border-bottom: 1px solid #e1e4e8;
+  font-weight: 600;
+}
+
+.column-count {
+  font-size: 12px;
+  color: #6a737d;
+  background: #e1e4e8;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.table-wrapper {
+  max-height: 400px;
+  overflow: auto;
+  /* 👇 Enable horizontal scroll */
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+table {
+  min-width: 100%;
+  /* 👈 Forces horizontal scroll */
+}
+
+th,
+td {
+  white-space: nowrap;
+  /* 👈 No text wrap */
+}
+
+.scroll-indicator {
+  padding: 10px 15px;
+  background: #fff3cd;
+  text-align: center;
+  font-size: 13px;
+  color: #856404;
+  font-style: italic;
+}
+
+.summary-row td {
+  background: #f8f9fa !important;
+  font-weight: 500;
+}
+
+/* Custom scrollbar */
+.table-wrapper::-webkit-scrollbar {
+  height: 12px;
+}
+
+.table-wrapper::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 6px;
+}
