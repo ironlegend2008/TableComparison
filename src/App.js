@@ -1,10 +1,10 @@
-import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import React, { useState, useMemo } from "react";
 import jsPDF from "jspdf";
 import "jspdf-autotable";
 import "./App.css";
 
 function parseCSV(text) {
-  const lines = text.replace(/\\\\\\r\\\\\\n/g, "\\\\\\n").split("\\\\\\n").filter(l => l.trim());
+  const lines = text.replace(/\r\n/g, "\n").split("\n").filter(l => l.trim());
   if (lines.length === 0) return { headers: [], rows: [] };
 
   // ✅ PROPER CSV PARSER - handles quotes + commas
@@ -19,13 +19,13 @@ function parseCSV(text) {
       if (char === '"') {
         inQuotes = !inQuotes;
       } else if (char === ',' && !inQuotes) {
-        result.push(current.trim().replace(/^"|"$/g, ''));
+        result.push(current.trim().replace(/^"|"$/g, '')); // Remove quotes
         current = '';
       } else {
         current += char;
       }
     }
-    result.push(current.trim().replace(/^"|"$/g, ''));
+    result.push(current.trim().replace(/^"|"$/g, '')); // Last field
     return result;
   };
 
@@ -87,11 +87,14 @@ function computeDifferences(table1, table2, pk) {
       const v1 = row1[col] ?? "";
       const v2 = row2[col] ?? "";
       if (v1 !== v2) {
-        diffsByColumn[col].push({
-          [pk]: key,
-          tableA: v1,
-          tableB: v2
-        });
+        // Guard to avoid unbounded memory if everything differs
+        if (diffsByColumn[col].length < 200000) {
+          diffsByColumn[col].push({
+            [pk]: key,
+            tableA: v1,
+            tableB: v2
+          });
+        }
       }
     });
   });
@@ -107,13 +110,10 @@ function computeDifferences(table1, table2, pk) {
   };
 }
 
-// ✅ NEW: Infinite Scroll Column Diff Table (NO pagination)
-function InfiniteScrollColumnDiffTable({ columnName, pk, diffRows }) {
+function SortableColumnDiffTable({ columnName, pk, diffRows }) {
   const [sortConfig, setSortConfig] = useState({ column: pk, direction: "asc" });
-  const [visibleCount, setVisibleCount] = useState(1000); // Start with 1000 rows
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const tableRef = useRef(null);
-  const observerRef = useRef(null);
+  const [visibleStart, setVisibleStart] = useState(0);
+  const PAGE_SIZE = 2000;
 
   const sortedRows = useMemo(() => {
     if (!diffRows || diffRows.length === 0) return [];
@@ -131,68 +131,45 @@ function InfiniteScrollColumnDiffTable({ columnName, pk, diffRows }) {
     return arr;
   }, [diffRows, sortConfig]);
 
-  const handleSort = useCallback((col) => {
+  const handleSort = (col) => {
     setSortConfig(prev => {
       if (prev.column === col) {
         return { column: col, direction: prev.direction === "asc" ? "desc" : "asc" };
       }
       return { column: col, direction: "asc" };
     });
-    setVisibleCount(1000); // Reset to 1000 on sort
-  }, []);
+    setVisibleStart(0);
+  };
 
   const sortIndicator = (col) => {
     if (sortConfig.column !== col) return "";
     return sortConfig.direction === "asc" ? " ↑" : " ↓";
   };
 
-  // ✅ Infinite scroll logic
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting && !isLoadingMore && visibleCount < sortedRows.length) {
-          setIsLoadingMore(true);
-          setTimeout(() => {
-            setVisibleCount(prev => Math.min(prev + 1000, sortedRows.length));
-            setIsLoadingMore(false);
-          }, 50); // Small delay for smooth UX
-        }
-      },
-      { threshold: 0.1 }
-    );
-
-    if (tableRef.current) {
-      const lastRow = tableRef.current.querySelector('tbody tr:last-child');
-      if (lastRow) {
-        observer.observe(lastRow);
-        observerRef.current = observer;
-      }
-    }
-
-    return () => {
-      if (observerRef.current) {
-        observerRef.current.disconnect();
-      }
-    };
-  }, [visibleCount, sortedRows.length, isLoadingMore]);
-
   if (!diffRows || diffRows.length === 0) return null;
 
-  const displayRows = sortedRows.slice(0, visibleCount);
   const total = sortedRows.length;
-  const isFullyLoaded = visibleCount >= total;
+  const visibleEnd = Math.min(visibleStart + PAGE_SIZE, total);
+  const windowRows = sortedRows.slice(visibleStart, visibleEnd);
+  const canPrev = visibleStart > 0;
+  const canNext = visibleEnd < total;
+
+  const goPrev = () => {
+    if (canPrev) setVisibleStart(Math.max(0, visibleStart - PAGE_SIZE));
+  };
+
+  const goNext = () => {
+    if (canNext) setVisibleStart(visibleStart + PAGE_SIZE);
+  };
 
   return (
     <div className="column-diff-table">
       <div className="column-diff-header">
         <span className="column-name">{columnName}</span>
-        <span className="diff-count">
-          {total.toLocaleString()} differences
-          {isFullyLoaded ? " (all loaded)" : ` (showing ${visibleCount.toLocaleString()})`}
-        </span>
+        <span className="diff-count">{diffRows.length} differences</span>
       </div>
-      <div className="infinite-table-wrapper">
-        <table ref={tableRef}>
+      <div className="table-wrapper">
+        <table>
           <thead>
             <tr>
               <th className="sortable" onClick={() => handleSort(pk)}>
@@ -207,37 +184,56 @@ function InfiniteScrollColumnDiffTable({ columnName, pk, diffRows }) {
             </tr>
           </thead>
           <tbody>
-            {displayRows.map((row, idx) => (
-              <tr key={`${sortConfig.column}-${row[pk]}-${idx}`}>
+            {windowRows.map((row, idx) => (
+              <tr key={visibleStart + idx}>
                 <td className="pk-cell">{row[pk]}</td>
                 <td className="value-cell-a">{row.tableA}</td>
                 <td className="value-cell-b">{row.tableB}</td>
               </tr>
             ))}
-            {!isFullyLoaded && (
-              <tr className="loading-row">
-                <td colSpan={3} className="loading-cell">
-                  {isLoadingMore ? "Loading more rows..." : `Scroll for more (${(total - visibleCount).toLocaleString()} remaining)`}
-                </td>
-              </tr>
-            )}
           </tbody>
         </table>
       </div>
+      {total > PAGE_SIZE && (
+        <div
+          style={{
+            padding: "8px 12px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            fontSize: "12px",
+          }}
+        >
+          <span>
+            Showing {visibleStart + 1}–{visibleEnd} of {total.toLocaleString()} rows
+          </span>
+          <div>
+            <button
+              onClick={goPrev}
+              disabled={!canPrev}
+              style={{ marginRight: "8px" }}
+            >
+              Prev
+            </button>
+            <button onClick={goNext} disabled={!canNext}>
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-// ✅ Updated Missing Rows Table (also infinite scroll)
-function InfiniteScrollMissingTable({ title, rows, pk, headers }) {
+function SortableMissingTable({ title, rows, pk, headers }) {
   const [sortConfig, setSortConfig] = useState({ column: pk, direction: "asc" });
-  const [visibleCount, setVisibleCount] = useState(1000);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const tableRef = useRef(null);
-  const observerRef = useRef(null);
+
+  const [visibleStart, setVisibleStart] = useState(0);
+  const PAGE_SIZE = 2000;
 
   const sortedRows = useMemo(() => {
     if (!rows || rows.length === 0) return [];
+
     const arr = [...rows];
     const { column, direction } = sortConfig;
     if (!column) return arr;
@@ -249,65 +245,47 @@ function InfiniteScrollMissingTable({ title, rows, pk, headers }) {
       if (av > bv) return direction === "asc" ? 1 : -1;
       return 0;
     });
+
     return arr;
   }, [rows, sortConfig]);
 
-  const handleSort = useCallback((col) => {
+  const handleSort = (col) => {
     setSortConfig(prev => ({
       column: col,
       direction: prev.column === col && prev.direction === "asc" ? "desc" : "asc"
     }));
-    setVisibleCount(1000);
-  }, []);
+    setVisibleStart(0);
+  };
 
   const sortIndicator = (col) =>
     sortConfig.column === col ? ` ${sortConfig.direction === "asc" ? "↑" : "↓"}` : "";
 
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting && !isLoadingMore && visibleCount < sortedRows.length) {
-          setIsLoadingMore(true);
-          setTimeout(() => {
-            setVisibleCount(prev => Math.min(prev + 1000, sortedRows.length));
-            setIsLoadingMore(false);
-          }, 50);
-        }
-      },
-      { threshold: 0.1 }
-    );
-
-    if (tableRef.current) {
-      const lastRow = tableRef.current.querySelector('tbody tr:last-child');
-      if (lastRow) {
-        observer.observe(lastRow);
-        observerRef.current = observer;
-      }
-    }
-
-    return () => {
-      if (observerRef.current) {
-        observerRef.current.disconnect();
-      }
-    };
-  }, [visibleCount, sortedRows.length, isLoadingMore]);
-
   if (!rows || rows.length === 0) return null;
 
   const total = sortedRows.length;
-  const displayRows = sortedRows.slice(0, visibleCount);
-  const isFullyLoaded = visibleCount >= total;
+  const visibleEnd = Math.min(visibleStart + PAGE_SIZE, total);
+  const windowRows = sortedRows.slice(visibleStart, visibleEnd);
+  const canPrev = visibleStart > 0;
+  const canNext = visibleEnd < total;
+
+  const goPrev = () => {
+    if (canPrev) setVisibleStart(Math.max(0, visibleStart - PAGE_SIZE));
+  };
+
+  const goNext = () => {
+    if (canNext) setVisibleStart(visibleStart + PAGE_SIZE);
+  };
 
   return (
     <div className="table-container">
       <div className="table-header">
-        {title} ({total.toLocaleString()} rows)
-        <span className="column-count">{headers.length} columns {isFullyLoaded ? "(all loaded)" : ""}</span>
+        {title} ({rows.length.toLocaleString()} rows)
+        <span className="column-count">{headers.length} columns</span>
       </div>
 
       <div className="table-scroll-wrapper">
-        <div className="infinite-table-wrapper">
-          <table ref={tableRef}>
+        <div className="table-wrapper">
+          <table>
             <thead>
               <tr>
                 {headers.map(col => (
@@ -323,8 +301,8 @@ function InfiniteScrollMissingTable({ title, rows, pk, headers }) {
               </tr>
             </thead>
             <tbody>
-              {displayRows.map((row, idx) => (
-                <tr key={`${sortConfig.column}-${pk ? row[pk] : idx}-${idx}`}>
+              {windowRows.map((row, idx) => (
+                <tr key={visibleStart + idx}>
                   {headers.map(col => (
                     <td key={col} style={{ minWidth: '120px' }}>
                       {row[col] || '(empty)'}
@@ -332,13 +310,6 @@ function InfiniteScrollMissingTable({ title, rows, pk, headers }) {
                   ))}
                 </tr>
               ))}
-              {!isFullyLoaded && (
-                <tr className="loading-row">
-                  <td colSpan={headers.length} className="loading-cell">
-                    {isLoadingMore ? "Loading more rows..." : `Scroll for more...`}
-                  </td>
-                </tr>
-              )}
             </tbody>
           </table>
         </div>
@@ -347,6 +318,34 @@ function InfiniteScrollMissingTable({ title, rows, pk, headers }) {
           {headers.length > 8 && `← Scroll horizontally to see all ${headers.length} columns →`}
         </div>
       </div>
+
+      {total > PAGE_SIZE && (
+        <div
+          style={{
+            padding: "8px 12px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            fontSize: "12px",
+          }}
+        >
+          <span>
+            Showing {visibleStart + 1}–{visibleEnd} of {total.toLocaleString()} rows
+          </span>
+          <div>
+            <button
+              onClick={goPrev}
+              disabled={!canPrev}
+              style={{ marginRight: "8px" }}
+            >
+              Prev
+            </button>
+            <button onClick={goNext} disabled={!canNext}>
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -412,6 +411,7 @@ function App() {
     setLoading(true);
 
     try {
+      // FIXED: Proper full-width container
       const container = document.createElement('div');
       container.id = 'pdf-container';
       container.style.cssText = `
@@ -426,46 +426,47 @@ function App() {
       `;
       document.body.appendChild(container);
 
+      // Clone with full data visible
       const appContent = document.querySelector('.app-container');
       const clone = appContent.cloneNode(true);
 
+      // FIXED: Force dropdown to show selected PK value
       const pkSelect = clone.querySelector('select');
       if (pkSelect && pk) {
         pkSelect.value = pk;
       }
 
-      // For PDF, show first 50 rows max per table to avoid massive PDF
-      clone.querySelectorAll('.infinite-table-wrapper table tbody').forEach(tbody => {
-        Array.from(tbody.children).slice(50).forEach(row => row.remove());
-      });
-
-      clone.querySelectorAll('.table-wrapper, .infinite-table-wrapper').forEach(wrapper => {
+      // CRITICAL: Force all tables to show full content (within current window)
+      clone.querySelectorAll('.table-wrapper').forEach(wrapper => {
         wrapper.style.maxHeight = 'none !important';
         wrapper.style.overflow = 'visible !important';
         wrapper.style.height = 'auto !important';
       });
 
+      // Disable interactions only
       clone.querySelectorAll('input, select, button').forEach(el => {
         el.style.pointerEvents = 'none';
       });
 
       container.appendChild(clone);
 
+      // Wait for layout
       await new Promise(r => setTimeout(r, 100));
 
       const html2canvas = (await import('html2canvas')).default;
       const canvas = await html2canvas(container, {
-        scale: 1.2,
+        scale: 1.2,  // Perfect balance
         useCORS: true,
         allowTaint: true,
         logging: false,
-        backgroundColor: null,
+        backgroundColor: null,  // Use page background
         width: 1200,
         height: Math.max(container.scrollHeight, 800),
         scrollX: 0,
         scrollY: 0
       });
 
+      // Optimized PDF
       const imgData = canvas.toDataURL('image/jpeg', 0.9);
       const pdf = new jsPDF('p', 'mm', 'a4');
 
@@ -582,19 +583,19 @@ function App() {
         <div className="section">
           <div className="section-title">Missing Rows</div>
           <div className="missing-rows-section">
-            <InfiniteScrollMissingTable
+            <SortableMissingTable
               title="Missing from Table B"
               rows={missingRows.onlyInA}
               pk={pk}
               headers={tableA.headers}
             />
-            <InfiniteScrollMissingTable
+            <SortableMissingTable
               title="Extra in Table B"
               rows={missingRows.onlyInB}
               pk={pk}
               headers={tableB.headers}
             />
-            {missingRows.onlyInA.length === 0 && missingRows.onlyB.length === 0 && (
+            {missingRows.onlyInA.length === 0 && missingRows.onlyInB.length === 0 && (
               <div className="success-message">All primary keys present in both tables</div>
             )}
           </div>
@@ -606,7 +607,7 @@ function App() {
         {canCompare ? (
           <div className="column-diff-container">
             {Object.keys(diffsByColumn).map(colName => (
-              <InfiniteScrollColumnDiffTable
+              <SortableColumnDiffTable
                 key={colName}
                 columnName={colName}
                 pk={pk}

@@ -169,6 +169,7 @@ select:focus {
 
 .structure-label.error {
   color: #dc3545;
+  border-color: #dc3545;
 }
 
 .structure-label.warning {
@@ -214,7 +215,6 @@ select:focus {
   border-radius: 6px;
   overflow: hidden;
   background: white;
-  max-height: 700px;
 }
 
 .table-header {
@@ -224,26 +224,6 @@ select:focus {
   font-weight: 600;
   font-size: 14px;
   color: #2c3e50;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.column-count {
-  font-size: 12px;
-  color: #6a737d;
-  font-weight: 400;
-}
-
-.table-scroll-wrapper {
-  position: relative;
-}
-
-/* ✅ NEW: Infinite scroll table styles */
-.infinite-table-wrapper {
-  max-height: 600px;
-  overflow: auto;
-  position: relative;
 }
 
 .table-wrapper {
@@ -295,7 +275,6 @@ td {
   border-radius: 6px;
   overflow: hidden;
   background: white;
-  max-height: 700px;
 }
 
 .column-diff-header {
@@ -303,9 +282,8 @@ td {
   justify-content: space-between;
   align-items: center;
   padding: 12px 15px;
-  background: linear-gradient(135deg, #4682b4 0%, #5a9bd4 100%);
+  background: #4682b4;
   color: white;
-  font-size: 14px;
 }
 
 .column-name {
@@ -315,10 +293,9 @@ td {
 
 .diff-count {
   font-size: 12px;
-  padding: 4px 8px;
+  padding: 4px 10px;
   background: rgba(255, 255, 255, 0.2);
   border-radius: 12px;
-  font-weight: 500;
 }
 
 .pk-cell {
@@ -334,19 +311,6 @@ td {
 .value-cell-b {
   background: #fff3e0;
   color: #e65100;
-}
-
-.loading-row {
-  height: 40px;
-}
-
-.loading-cell {
-  text-align: center !important;
-  font-style: italic;
-  color: #6a737d !important;
-  background: #f6f8fa !important;
-  padding: 12px !important;
-  font-size: 13px !important;
 }
 
 /* Button */
@@ -377,38 +341,23 @@ td {
   cursor: not-allowed;
 }
 
-/* Scroll Indicators */
-.scroll-indicator {
-  padding: 8px 15px;
-  background: #f6f8fa;
-  font-size: 12px;
-  color: #6a737d;
-  text-align: center;
-  border-top: 1px solid #e1e4e8;
+/* Scrollbar */
+.table-wrapper::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
 
-/* Scrollbar Styles */
-.table-wrapper::-webkit-scrollbar,
-.infinite-table-wrapper::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+.table-wrapper::-webkit-scrollbar-track {
+  background: #f1f1f1;
 }
 
-.table-wrapper::-webkit-scrollbar-track,
-.infinite-table-wrapper::-webkit-scrollbar-track {
-  background: #f1f3f4;
-  border-radius: 10px;
+.table-wrapper::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 4px;
 }
 
-.table-wrapper::-webkit-scrollbar-thumb,
-.infinite-table-wrapper::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, #c1c1c1 0%, #a8a8a8 100%);
-  border-radius: 10px;
-}
-
-.table-wrapper::-webkit-scrollbar-thumb:hover,
-.infinite-table-wrapper::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, #a8a8a8 0%, #969696 100%);
+.table-wrapper::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
 }
 
 /* Responsive */
@@ -434,32 +383,7 @@ td {
     max-width: 100%;
   }
 
-  .infinite-table-wrapper {
-    max-height: 400px;
-  }
-
-  .column-diff-table,
-  .table-container {
-    max-height: 500px;
-  }
-
   .table-wrapper {
     max-height: 300px;
-  }
-
-  .column-diff-header {
-    flex-direction: column;
-    gap: 8px;
-    text-align: center;
-  }
-}
-
-@media (max-width: 480px) {
-  .app-container {
-    padding: 15px;
-  }
-
-  h1 {
-    font-size: 20px;
   }
 }
