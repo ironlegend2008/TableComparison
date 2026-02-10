@@ -42,7 +42,6 @@ function parseCSV(text) {
   return { headers, rows };
 }
 
-
 function computeColumnDifferences(headersA, headersB) {
   const onlyA = headersA.filter(h => !headersB.includes(h));
   const onlyB = headersB.filter(h => !headersA.includes(h));
@@ -63,7 +62,7 @@ function computeMissingRows(table1, table2, pk) {
 }
 
 function computeDifferences(table1, table2, pk) {
-  if (!pk) return { matchingCount: 0, totalInA: 0, totalInB: 0, diffsByColumn: {} };
+  if (!pk) return { matchingCount: 0, totalInA: 0, totalInB: 0, diffsByColumn: {}, totalMismatches: 0 };
 
   const map2 = new Map();
   table2.rows.forEach(row => map2.set(row[pk], row));
@@ -88,11 +87,14 @@ function computeDifferences(table1, table2, pk) {
       const v1 = row1[col] ?? "";
       const v2 = row2[col] ?? "";
       if (v1 !== v2) {
-        diffsByColumn[col].push({
-          [pk]: key,
-          tableA: v1,
-          tableB: v2
-        });
+        // Guard to avoid unbounded memory if everything differs
+        if (diffsByColumn[col].length < 200000) {
+          diffsByColumn[col].push({
+            [pk]: key,
+            tableA: v1,
+            tableB: v2
+          });
+        }
       }
     });
   });
@@ -110,19 +112,23 @@ function computeDifferences(table1, table2, pk) {
 
 function SortableColumnDiffTable({ columnName, pk, diffRows }) {
   const [sortConfig, setSortConfig] = useState({ column: pk, direction: "asc" });
+  const [visibleStart, setVisibleStart] = useState(0);
+  const PAGE_SIZE = 200;
 
   const sortedRows = useMemo(() => {
+    if (!diffRows || diffRows.length === 0) return [];
     const arr = [...diffRows];
     const { column, direction } = sortConfig;
     if (!column) return arr;
 
-    return arr.sort((a, b) => {
-      const av = a[column] || "";
-      const bv = b[column] || "";
+    arr.sort((a, b) => {
+      const av = (a[column] || "").toString();
+      const bv = (b[column] || "").toString();
       if (av < bv) return direction === "asc" ? -1 : 1;
       if (av > bv) return direction === "asc" ? 1 : -1;
       return 0;
     });
+    return arr;
   }, [diffRows, sortConfig]);
 
   const handleSort = (col) => {
@@ -132,6 +138,7 @@ function SortableColumnDiffTable({ columnName, pk, diffRows }) {
       }
       return { column: col, direction: "asc" };
     });
+    setVisibleStart(0);
   };
 
   const sortIndicator = (col) => {
@@ -139,7 +146,21 @@ function SortableColumnDiffTable({ columnName, pk, diffRows }) {
     return sortConfig.direction === "asc" ? " ↑" : " ↓";
   };
 
-  if (diffRows.length === 0) return null;
+  if (!diffRows || diffRows.length === 0) return null;
+
+  const total = sortedRows.length;
+  const visibleEnd = Math.min(visibleStart + PAGE_SIZE, total);
+  const windowRows = sortedRows.slice(visibleStart, visibleEnd);
+  const canPrev = visibleStart > 0;
+  const canNext = visibleEnd < total;
+
+  const goPrev = () => {
+    if (canPrev) setVisibleStart(Math.max(0, visibleStart - PAGE_SIZE));
+  };
+
+  const goNext = () => {
+    if (canNext) setVisibleStart(visibleStart + PAGE_SIZE);
+  };
 
   return (
     <div className="column-diff-table">
@@ -163,8 +184,8 @@ function SortableColumnDiffTable({ columnName, pk, diffRows }) {
             </tr>
           </thead>
           <tbody>
-            {sortedRows.map((row, idx) => (
-              <tr key={idx}>
+            {windowRows.map((row, idx) => (
+              <tr key={visibleStart + idx}>
                 <td className="pk-cell">{row[pk]}</td>
                 <td className="value-cell-a">{row.tableA}</td>
                 <td className="value-cell-b">{row.tableB}</td>
@@ -173,6 +194,33 @@ function SortableColumnDiffTable({ columnName, pk, diffRows }) {
           </tbody>
         </table>
       </div>
+      {total > PAGE_SIZE && (
+        <div
+          style={{
+            padding: "8px 12px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            fontSize: "12px",
+          }}
+        >
+          <span>
+            Showing {visibleStart + 1}–{visibleEnd} of {total.toLocaleString()} rows
+          </span>
+          <div>
+            <button
+              onClick={goPrev}
+              disabled={!canPrev}
+              style={{ marginRight: "8px" }}
+            >
+              Prev
+            </button>
+            <button onClick={goNext} disabled={!canNext}>
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -180,67 +228,124 @@ function SortableColumnDiffTable({ columnName, pk, diffRows }) {
 function SortableMissingTable({ title, rows, pk, headers }) {
   const [sortConfig, setSortConfig] = useState({ column: pk, direction: "asc" });
 
+  const [visibleStart, setVisibleStart] = useState(0);
+  const PAGE_SIZE = 200;
+
   const sortedRows = useMemo(() => {
+    if (!rows || rows.length === 0) return [];
+
     const arr = [...rows];
     const { column, direction } = sortConfig;
     if (!column) return arr;
 
-    return arr.sort((a, b) => {
-      const av = a[column] ?? "";
-      const bv = b[column] ?? "";
+    arr.sort((a, b) => {
+      const av = (a[column] ?? "").toString();
+      const bv = (b[column] ?? "").toString();
       if (av < bv) return direction === "asc" ? -1 : 1;
       if (av > bv) return direction === "asc" ? 1 : -1;
       return 0;
     });
+
+    return arr;
   }, [rows, sortConfig]);
 
   const handleSort = (col) => {
-    setSortConfig(prev => {
-      if (prev.column === col) {
-        return { column: col, direction: prev.direction === "asc" ? "desc" : "asc" };
-      }
-      return { column: col, direction: "asc" };
-    });
+    setSortConfig(prev => ({
+      column: col,
+      direction: prev.column === col && prev.direction === "asc" ? "desc" : "asc"
+    }));
+    setVisibleStart(0);
   };
 
-  const sortIndicator = (col) => {
-    if (sortConfig.column !== col) return "";
-    return sortConfig.direction === "asc" ? " ↑" : " ↓";
+  const sortIndicator = (col) =>
+    sortConfig.column === col ? ` ${sortConfig.direction === "asc" ? "↑" : "↓"}` : "";
+
+  if (!rows || rows.length === 0) return null;
+
+  const total = sortedRows.length;
+  const visibleEnd = Math.min(visibleStart + PAGE_SIZE, total);
+  const windowRows = sortedRows.slice(visibleStart, visibleEnd);
+  const canPrev = visibleStart > 0;
+  const canNext = visibleEnd < total;
+
+  const goPrev = () => {
+    if (canPrev) setVisibleStart(Math.max(0, visibleStart - PAGE_SIZE));
   };
 
-  if (rows.length === 0) return null;
-
-  const displayHeaders = headers.slice(0, 6);
+  const goNext = () => {
+    if (canNext) setVisibleStart(visibleStart + PAGE_SIZE);
+  };
 
   return (
     <div className="table-container">
-      <div className="table-header">{title} ({rows.length} rows)</div>
-      <div className="table-wrapper">
-        <table>
-          <thead>
-            <tr>
-              {displayHeaders.map(col => (
-                <th
-                  key={col}
-                  className="sortable"
-                  onClick={() => handleSort(col)}
-                >
-                  {col}{sortIndicator(col)}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {sortedRows.map((row, idx) => (
-              <tr key={idx}>
-                {displayHeaders.map(col => (
-                  <td key={col}>{row[col] || ''}</td>
+      <div className="table-header">
+        {title} ({rows.length.toLocaleString()} rows)
+        <span className="column-count">{headers.length} columns</span>
+      </div>
+
+      <div className="table-scroll-wrapper">
+        <div className="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                {headers.map(col => (
+                  <th
+                    key={col}
+                    className="sortable"
+                    onClick={() => handleSort(col)}
+                    style={{ minWidth: Math.max(120, col.length * 10 + 40) + 'px' }}
+                  >
+                    {col}{sortIndicator(col)}
+                  </th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {windowRows.map((row, idx) => (
+                <tr key={visibleStart + idx}>
+                  {headers.map(col => (
+                    <td key={col} style={{ minWidth: '120px' }}>
+                      {row[col] || '(empty)'}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="scroll-indicator">
+          {headers.length > 8 && `← Scroll horizontally to see all ${headers.length} columns →`}
+        </div>
       </div>
+
+      {total > PAGE_SIZE && (
+        <div
+          style={{
+            padding: "8px 12px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            fontSize: "12px",
+          }}
+        >
+          <span>
+            Showing {visibleStart + 1}–{visibleEnd} of {total.toLocaleString()} rows
+          </span>
+          <div>
+            <button
+              onClick={goPrev}
+              disabled={!canPrev}
+              style={{ marginRight: "8px" }}
+            >
+              Prev
+            </button>
+            <button onClick={goNext} disabled={!canNext}>
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -310,18 +415,17 @@ function App() {
       const container = document.createElement('div');
       container.id = 'pdf-container';
       container.style.cssText = `
-      position: absolute;
-      left: -9999px;
-      top: 0;
-      width: 1200px !important;
-      padding: 30px !important;
-      background: #f5f7fa !important;
-      font-family: inherit !important;
-      box-sizing: border-box !important;
-    `;
+        position: absolute;
+        left: -9999px;
+        top: 0;
+        width: 1200px !important;
+        padding: 30px !important;
+        background: #f5f7fa !important;
+        font-family: inherit !important;
+        box-sizing: border-box !important;
+      `;
       document.body.appendChild(container);
 
-      // Clone with full data visible
       // Clone with full data visible
       const appContent = document.querySelector('.app-container');
       const clone = appContent.cloneNode(true);
@@ -332,7 +436,7 @@ function App() {
         pkSelect.value = pk;
       }
 
-      // CRITICAL: Force all tables to show full content
+      // CRITICAL: Force all tables to show full content (within current window)
       clone.querySelectorAll('.table-wrapper').forEach(wrapper => {
         wrapper.style.maxHeight = 'none !important';
         wrapper.style.overflow = 'visible !important';
