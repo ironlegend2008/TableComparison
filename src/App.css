@@ -388,102 +388,79 @@ td {
   }
 }
 
-/* ✅ VIRTUAL SCROLLING STYLES */
-.virtual-table-container {
-  position: relative;
-  border: 1px solid #e1e4e8;
-  border-radius: 0 0 6px 6px;
-  background: white;
+/* Add these new styles to your existing App.css */
+
+/* Infinite Scroll Specific */
+.infinite-scroll-wrapper {
+  max-height: 600px !important;
+  /* Taller for better scrolling */
+  overflow-y: auto;
+  overflow-x: auto;
 }
 
-.virtual-table-container::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-.virtual-table-container::-webkit-scrollbar-track {
-  background: #f1f1f1;
-}
-
-.virtual-table-container::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
-  border-radius: 4px;
-}
-
-.virtual-table-container::-webkit-scrollbar-thumb:hover {
-  background: #a8a8a8;
-}
-
-/* Column Diff Virtual Rows (3 columns) */
-.virtual-row {
-  display: flex;
-  border-bottom: 1px solid #e1e4e8;
-  background: white;
-  font-size: 14px;
-}
-
-.virtual-row .pk-cell {
-  flex: 1;
-  padding: 8px 12px;
-  font-weight: 600;
-  color: #2c3e50;
-  border-right: 1px solid #e1e4e8;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.virtual-row .value-cell-a {
-  flex: 1;
-  padding: 8px 12px;
-  background: #e3f2fd;
-  color: #1565c0;
-  border-right: 1px solid #e1e4e8;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.virtual-row .value-cell-b {
-  flex: 1;
-  padding: 8px 12px;
-  background: #fff3e0;
-  color: #e65100;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Missing Rows Virtual Rows (many columns) */
-.virtual-row-wide {
-  display: flex;
-  border-bottom: 1px solid #e1e4e8;
-  background: white;
-  font-size: 14px;
-}
-
-.virtual-row-wide .table-cell {
-  flex: 1;
-  min-width: 120px;
-  padding: 8px 12px;
-  color: #586069;
-  border-right: 1px solid #e1e4e8;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.virtual-row-wide .table-cell:last-child {
-  border-right: none;
-}
-
-/* Hover effects */
-.virtual-row:hover,
-.virtual-row-wide:hover {
+.loading-row td {
+  padding: 20px !important;
+  text-align: center !important;
+  font-style: italic;
+  color: #666 !important;
   background: #f8f9fa !important;
 }
 
-/* Fixed header hover */
-.sortable:hover {
-  background: #e1e4e8 !important;
+.loaded-all-row td {
+  padding: 15px !important;
+  text-align: center !important;
+  font-weight: 500;
+  color: #28a745 !important;
+  background: #d4edda !important;
+}
+
+.scroll-hint {
+  padding: 10px 15px;
+  background: #e9ecef;
+  font-size: 13px;
+  color: #6c757d;
+  text-align: center;
+  border-top: 1px solid #dee2e6;
+}
+
+/* Improve table responsiveness for large datasets */
+.column-diff-table table {
+  min-width: 600px;
+}
+
+.column-diff-table th,
+.column-diff-table td {
+  white-space: nowrap;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.column-diff-table td:hover {
+  white-space: normal;
+  overflow: visible;
+  background: rgba(0, 123, 255, 0.05);
+  z-index: 1;
+  position: relative;
+}
+
+/* Better loading states */
+.column-diff-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 15px;
+  background: linear-gradient(135deg, #4682b4 0%, #5a9bd4 100%);
+  color: white;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.diff-count {
+  font-size: 12px;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 12px;
+  font-weight: 500;
 }
