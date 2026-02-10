@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import jsPDF from "jspdf";
 import "jspdf-autotable";
 import "./App.css";
@@ -61,62 +61,59 @@ function computeMissingRows(table1, table2, pk) {
   return { onlyInA, onlyInB };
 }
 
-function computeDifferences(table1, table2, pk) {
-  if (!pk) return { matchingCount: 0, totalInA: 0, totalInB: 0, diffsByColumn: {}, totalMismatches: 0 };
+// ✅ NEW: Async column differences computation
+const computeColumnDiffsAsync = async (table1, table2, pk) => {
+  return new Promise((resolve) => {
+    const map2 = new Map();
+    table2.rows.forEach(row => map2.set(row[pk], row));
 
-  const map2 = new Map();
-  table2.rows.forEach(row => map2.set(row[pk], row));
-
-  let matchingCount = 0;
-  const diffsByColumn = {};
-
-  table1.headers.forEach(col => {
-    if (col !== pk) {
-      diffsByColumn[col] = [];
-    }
-  });
-
-  table1.rows.forEach(row1 => {
-    const key = row1[pk];
-    if (!map2.has(key)) return;
-    const row2 = map2.get(key);
-    matchingCount += 1;
+    let matchingCount = 0;
+    const diffsByColumn = {};
 
     table1.headers.forEach(col => {
-      if (col === pk) return;
-      const v1 = row1[col] ?? "";
-      const v2 = row2[col] ?? "";
-      if (v1 !== v2) {
-        diffsByColumn[col].push({
-          [pk]: key,
-          tableA: v1,
-          tableB: v2
-        });
+      if (col !== pk) {
+        diffsByColumn[col] = [];
       }
     });
+
+    table1.rows.forEach(row1 => {
+      const key = row1[pk];
+      if (!map2.has(key)) return;
+      const row2 = map2.get(key);
+      matchingCount += 1;
+
+      table1.headers.forEach(col => {
+        if (col === pk) return;
+        const v1 = row1[col] ?? "";
+        const v2 = row2[col] ?? "";
+        if (v1 !== v2) {
+          // Guard to avoid browser crash on massive datasets
+          if (diffsByColumn[col].length < 200000) {
+            diffsByColumn[col].push({
+              [pk]: key,
+              tableA: v1,
+              tableB: v2
+            });
+          }
+        }
+      });
+    });
+
+    const totalMismatches = Object.values(diffsByColumn).reduce((sum, arr) => sum + arr.length, 0);
+
+    resolve({
+      matchingCount,
+      totalInA: table1.rows.length,
+      totalInB: table2.rows.length,
+      diffsByColumn,
+      totalMismatches
+    });
   });
+};
 
-  const totalMismatches = Object.values(diffsByColumn).reduce((sum, arr) => sum + arr.length, 0);
-
-  return {
-    matchingCount,
-    totalInA: table1.rows.length,
-    totalInB: table2.rows.length,
-    diffsByColumn,
-    totalMismatches
-  };
-}
-
-function InfiniteScrollColumnDiffTable({ columnName, pk, diffRows, totalCount }) {
+function SortableColumnDiffTable({ columnName, pk, diffRows, isLoading }) {
   const [sortConfig, setSortConfig] = useState({ column: pk, direction: "asc" });
-  const [visibleRows, setVisibleRows] = useState([]);
-  const [displayedCount, setDisplayedCount] = useState(0);
-  const [isLoading, setIsLoading] = useState(false);
-  const [hasLoadedAll, setHasLoadedAll] = useState(false);
-  const observer = useRef();
-  const loadMoreRef = useRef();
-  const BATCH_SIZE = 1000;
-  const MAX_BATCHES = 100; // Limit to ~100k rows
+  const tableRef = useRef(null);
 
   const sortedRows = useMemo(() => {
     if (!diffRows || diffRows.length === 0) return [];
@@ -134,78 +131,30 @@ function InfiniteScrollColumnDiffTable({ columnName, pk, diffRows, totalCount })
     return arr;
   }, [diffRows, sortConfig]);
 
-  const loadMoreRows = useCallback(() => {
-    if (hasLoadedAll || isLoading || displayedCount >= sortedRows.length) return;
-
-    setIsLoading(true);
-
-    // Simulate loading time for large datasets (2-5 seconds for first batches)
-    const delay = Math.min(2000 + Math.random() * 3000, 5000);
-
-    setTimeout(() => {
-      const newCount = Math.min(displayedCount + BATCH_SIZE, sortedRows.length);
-      setVisibleRows(sortedRows.slice(0, newCount));
-      setDisplayedCount(newCount);
-
-      if (newCount >= sortedRows.length) {
-        setHasLoadedAll(true);
-      }
-
-      setIsLoading(false);
-    }, delay);
-  }, [displayedCount, sortedRows, hasLoadedAll, isLoading]);
-
-  useEffect(() => {
-    // Reset on new data or sort change
-    setVisibleRows([]);
-    setDisplayedCount(0);
-    setHasLoadedAll(false);
-    setIsLoading(false);
-  }, [diffRows, sortConfig]);
-
-  useEffect(() => {
-    // Load initial batch
-    if (sortedRows.length > 0 && displayedCount === 0) {
-      loadMoreRows();
-    }
-  }, [sortedRows.length, displayedCount, loadMoreRows]);
-
-  // Infinite scroll observer
-  useEffect(() => {
-    observer.current = new IntersectionObserver(
-      entries => {
-        const target = entries[0];
-        if (target.isIntersecting && !isLoading && !hasLoadedAll) {
-          loadMoreRows();
-        }
-      },
-      { threshold: 0.1 }
-    );
-
-    if (loadMoreRef.current) {
-      observer.current.observe(loadMoreRef.current);
-    }
-
-    return () => {
-      if (observer.current) {
-        observer.current.disconnect();
-      }
-    };
-  }, [loadMoreRef, isLoading, hasLoadedAll, loadMoreRows]);
-
-  const handleSort = (col) => {
+  const handleSort = useCallback((col) => {
     setSortConfig(prev => {
       if (prev.column === col) {
         return { column: col, direction: prev.direction === "asc" ? "desc" : "asc" };
       }
       return { column: col, direction: "asc" };
     });
-  };
+  }, []);
 
   const sortIndicator = (col) => {
     if (sortConfig.column !== col) return "";
     return sortConfig.direction === "asc" ? " ↑" : " ↓";
   };
+
+  if (isLoading) {
+    return (
+      <div className="column-diff-table">
+        <div className="column-diff-header">
+          <span className="column-name">{columnName}</span>
+          <div className="loading-spinner">⏳ Computing...</div>
+        </div>
+      </div>
+    );
+  }
 
   if (!diffRows || diffRows.length === 0) return null;
 
@@ -213,15 +162,10 @@ function InfiniteScrollColumnDiffTable({ columnName, pk, diffRows, totalCount })
     <div className="column-diff-table">
       <div className="column-diff-header">
         <span className="column-name">{columnName}</span>
-        <span className="diff-count">
-          {totalCount.toLocaleString()} total differences
-          {displayedCount > 0 && ` • Loaded ${displayedCount.toLocaleString()}`}
-          {hasLoadedAll && ' • All loaded'}
-        </span>
+        <span className="diff-count">{diffRows.length.toLocaleString()} differences</span>
       </div>
-
-      <div className="table-wrapper infinite-scroll-wrapper">
-        <table>
+      <div className="table-wrapper full-height">
+        <table ref={tableRef}>
           <thead>
             <tr>
               <th className="sortable" onClick={() => handleSort(pk)}>
@@ -236,33 +180,18 @@ function InfiniteScrollColumnDiffTable({ columnName, pk, diffRows, totalCount })
             </tr>
           </thead>
           <tbody>
-            {visibleRows.map((row, idx) => (
-              <tr key={`${sortConfig.column}-${sortConfig.direction}-${idx}`}>
+            {sortedRows.map((row, idx) => (
+              <tr key={idx}>
                 <td className="pk-cell">{row[pk]}</td>
                 <td className="value-cell-a">{row.tableA}</td>
                 <td className="value-cell-b">{row.tableB}</td>
               </tr>
             ))}
-            {isLoading && (
-              <tr>
-                <td colSpan={3} className="loading-row">
-                  🔄 Loading next {BATCH_SIZE.toLocaleString()} rows...
-                </td>
-              </tr>
-            )}
-            <tr ref={loadMoreRef} style={{ height: hasLoadedAll ? 0 : 20 }}>
-              {hasLoadedAll && (
-                <td colSpan={3} className="loaded-all-row">
-                  ✅ All {totalCount.toLocaleString()} differences loaded
-                </td>
-              )}
-            </tr>
           </tbody>
         </table>
       </div>
-
-      <div className="scroll-hint">
-        Scroll down to load more • Click headers to sort
+      <div className="table-footer">
+        {diffRows.length.toLocaleString()} total rows • Scroll to browse
       </div>
     </div>
   );
@@ -399,6 +328,14 @@ function App() {
   const [tableB, setTableB] = useState({ headers: [], rows: [] });
   const [pk, setPk] = useState("");
   const [loading, setLoading] = useState(false);
+  const [computingDiffs, setComputingDiffs] = useState(false);
+  const [diffsByColumn, setDiffsByColumn] = useState({});
+  const [summaryStats, setSummaryStats] = useState({
+    matchingCount: 0,
+    totalInA: 0,
+    totalInB: 0,
+    totalMismatches: 0
+  });
 
   const pkOptions = useMemo(() => {
     if (!tableA.headers.length || !tableB.headers.length) return [];
@@ -413,10 +350,44 @@ function App() {
     return computeMissingRows(tableA, tableB, pk);
   }, [tableA, tableB, pk]);
 
-  const { matchingCount, totalInA, totalInB, diffsByColumn, totalMismatches } = useMemo(() => {
-    if (!pk) return { matchingCount: 0, totalInA: 0, totalInB: 0, diffsByColumn: {}, totalMismatches: 0 };
-    return computeDifferences(tableA, tableB, pk);
-  }, [tableA, tableB, pk]);
+  // ✅ NEW: Async diffs computation on PK change
+  useEffect(() => {
+    let mounted = true;
+
+    const computeAllDiffs = async () => {
+      if (!pk || tableA.rows.length === 0 || tableB.rows.length === 0) {
+        if (mounted) {
+          setDiffsByColumn({});
+          setSummaryStats({ matchingCount: 0, totalInA: 0, totalInB: 0, totalMismatches: 0 });
+        }
+        return;
+      }
+
+      setComputingDiffs(true);
+      try {
+        const result = await computeColumnDiffsAsync(tableA, tableB, pk);
+        if (mounted) {
+          setDiffsByColumn(result.diffsByColumn);
+          setSummaryStats(result);
+        }
+      } catch (error) {
+        console.error('Diff computation failed:', error);
+        if (mounted) {
+          setDiffsByColumn({});
+        }
+      } finally {
+        if (mounted) {
+          setComputingDiffs(false);
+        }
+      }
+    };
+
+    computeAllDiffs();
+
+    return () => {
+      mounted = false;
+    };
+  }, [pk, tableA, tableB]);
 
   const canCompare = tableA.headers.length > 0 && tableB.headers.length > 0 && pk;
 
@@ -453,7 +424,6 @@ function App() {
     setLoading(true);
 
     try {
-      // FIXED: Proper full-width container
       const container = document.createElement('div');
       container.id = 'pdf-container';
       container.style.cssText = `
@@ -468,31 +438,26 @@ function App() {
       `;
       document.body.appendChild(container);
 
-      // Clone with full data visible
       const appContent = document.querySelector('.app-container');
       const clone = appContent.cloneNode(true);
 
-      // FIXED: Force dropdown to show selected PK value
       const pkSelect = clone.querySelector('select');
       if (pkSelect && pk) {
         pkSelect.value = pk;
       }
 
-      // CRITICAL: Force all tables to show full content (within current window)
       clone.querySelectorAll('.table-wrapper').forEach(wrapper => {
         wrapper.style.maxHeight = 'none !important';
         wrapper.style.overflow = 'visible !important';
         wrapper.style.height = 'auto !important';
       });
 
-      // Disable interactions only
       clone.querySelectorAll('input, select, button').forEach(el => {
         el.style.pointerEvents = 'none';
       });
 
       container.appendChild(clone);
 
-      // Wait for layout
       await new Promise(r => setTimeout(r, 100));
 
       const html2canvas = (await import('html2canvas')).default;
@@ -508,7 +473,6 @@ function App() {
         scrollY: 0
       });
 
-      // Optimized PDF
       const imgData = canvas.toDataURL('image/jpeg', 0.9);
       const pdf = new jsPDF('p', 'mm', 'a4');
 
@@ -564,7 +528,7 @@ function App() {
 
       {pkOptions.length > 0 && (
         <div className="section">
-          <div className="section-title">Select Primary Key</div>
+          <div className="section-title">Select Primary Key {computingDiffs && <span className="computing-badge">Computing...</span>}</div>
           <div className="controls-row">
             <select value={pk} onChange={(e) => setPk(e.target.value)}>
               <option value="">Choose primary key column...</option>
@@ -581,12 +545,12 @@ function App() {
         <div className="summary-grid">
           <div className="summary-card">
             <div className="summary-label">Row Counts</div>
-            <div className="summary-value">A: {totalInA} | B: {totalInB}</div>
+            <div className="summary-value">A: {summaryStats.totalInA.toLocaleString()} | B: {summaryStats.totalInB.toLocaleString()}</div>
           </div>
           <div className="summary-card">
             <div className="summary-label">PK Matching</div>
-            <div className="summary-value">{matchingCount} matched</div>
-            <div className="summary-subtext">Missing: {missingRows.onlyInA.length} | Extra: {missingRows.onlyInB.length}</div>
+            <div className="summary-value">{summaryStats.matchingCount.toLocaleString()} matched</div>
+            <div className="summary-subtext">Missing: {missingRows.onlyInA.length.toLocaleString()} | Extra: {missingRows.onlyInB.length.toLocaleString()}</div>
           </div>
           <div className="summary-card">
             <div className="summary-label">Columns</div>
@@ -596,7 +560,7 @@ function App() {
           </div>
           <div className="summary-card">
             <div className="summary-label">Data Mismatches</div>
-            <div className="summary-value">{totalMismatches} differences</div>
+            <div className="summary-value">{summaryStats.totalMismatches.toLocaleString()} differences</div>
           </div>
         </div>
       </div>
@@ -648,16 +612,23 @@ function App() {
         <div className="section-title">Data Mismatches by Column</div>
         {canCompare ? (
           <div className="column-diff-container">
-            {Object.keys(diffsByColumn).map(colName => (
-              <InfiniteScrollColumnDiffTable
-                key={colName}
-                columnName={colName}
-                pk={pk}
-                diffRows={diffsByColumn[colName]}
-                totalCount={diffsByColumn[colName].length}
-              />
-            ))}
-            {totalMismatches === 0 && (
+            {computingDiffs ? (
+              <div className="computing-message">
+                <div className="loading-spinner-large">⏳ Computing all differences...</div>
+                <div>This may take 10-60 seconds for large datasets</div>
+              </div>
+            ) : (
+              Object.keys(diffsByColumn).map(colName => (
+                <SortableColumnDiffTable
+                  key={colName}
+                  columnName={colName}
+                  pk={pk}
+                  diffRows={diffsByColumn[colName]}
+                  isLoading={false}
+                />
+              ))
+            )}
+            {!computingDiffs && Object.keys(diffsByColumn).length === 0 && summaryStats.totalMismatches === 0 && (
               <div className="success-message">All data values match for matching primary keys</div>
             )}
           </div>
