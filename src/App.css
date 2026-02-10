@@ -387,3 +387,103 @@ td {
     max-height: 300px;
   }
 }
+
+/* ✅ VIRTUAL SCROLLING STYLES */
+.virtual-table-container {
+  position: relative;
+  border: 1px solid #e1e4e8;
+  border-radius: 0 0 6px 6px;
+  background: white;
+}
+
+.virtual-table-container::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.virtual-table-container::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+.virtual-table-container::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 4px;
+}
+
+.virtual-table-container::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* Column Diff Virtual Rows (3 columns) */
+.virtual-row {
+  display: flex;
+  border-bottom: 1px solid #e1e4e8;
+  background: white;
+  font-size: 14px;
+}
+
+.virtual-row .pk-cell {
+  flex: 1;
+  padding: 8px 12px;
+  font-weight: 600;
+  color: #2c3e50;
+  border-right: 1px solid #e1e4e8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.virtual-row .value-cell-a {
+  flex: 1;
+  padding: 8px 12px;
+  background: #e3f2fd;
+  color: #1565c0;
+  border-right: 1px solid #e1e4e8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.virtual-row .value-cell-b {
+  flex: 1;
+  padding: 8px 12px;
+  background: #fff3e0;
+  color: #e65100;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Missing Rows Virtual Rows (many columns) */
+.virtual-row-wide {
+  display: flex;
+  border-bottom: 1px solid #e1e4e8;
+  background: white;
+  font-size: 14px;
+}
+
+.virtual-row-wide .table-cell {
+  flex: 1;
+  min-width: 120px;
+  padding: 8px 12px;
+  color: #586069;
+  border-right: 1px solid #e1e4e8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.virtual-row-wide .table-cell:last-child {
+  border-right: none;
+}
+
+/* Hover effects */
+.virtual-row:hover,
+.virtual-row-wide:hover {
+  background: #f8f9fa !important;
+}
+
+/* Fixed header hover */
+.sortable:hover {
+  background: #e1e4e8 !important;
+}

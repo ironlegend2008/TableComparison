@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import jsPDF from "jspdf";
 import "jspdf-autotable";
 import "./App.css";
@@ -7,7 +7,6 @@ function parseCSV(text) {
   const lines = text.replace(/\r\n/g, "\n").split("\n").filter(l => l.trim());
   if (lines.length === 0) return { headers: [], rows: [] };
 
-  // ✅ PROPER CSV PARSER - handles quotes + commas
   const parseLine = (line) => {
     const result = [];
     let current = '';
@@ -19,13 +18,13 @@ function parseCSV(text) {
       if (char === '"') {
         inQuotes = !inQuotes;
       } else if (char === ',' && !inQuotes) {
-        result.push(current.trim().replace(/^"|"$/g, '')); // Remove quotes
+        result.push(current.trim().replace(/^"|"$/g, ''));
         current = '';
       } else {
         current += char;
       }
     }
-    result.push(current.trim().replace(/^"|"$/g, '')); // Last field
+    result.push(current.trim().replace(/^"|"$/g, ''));
     return result;
   };
 
@@ -87,8 +86,7 @@ function computeDifferences(table1, table2, pk) {
       const v1 = row1[col] ?? "";
       const v2 = row2[col] ?? "";
       if (v1 !== v2) {
-        // Guard to avoid unbounded memory if everything differs
-        if (diffsByColumn[col].length < 200000) {
+        if (diffsByColumn[col].length < 500000) { // Safety limit
           diffsByColumn[col].push({
             [pk]: key,
             tableA: v1,
@@ -110,17 +108,18 @@ function computeDifferences(table1, table2, pk) {
   };
 }
 
+// ✅ VIRTUALIZED COLUMN DIFF TABLE
 function SortableColumnDiffTable({ columnName, pk, diffRows }) {
   const [sortConfig, setSortConfig] = useState({ column: pk, direction: "asc" });
-  const [visibleStart, setVisibleStart] = useState(0);
-  const PAGE_SIZE = 200;
+  const tableRef = useRef(null);
+  const ROW_HEIGHT = 35;
+  const VISIBLE_ROWS = 15;
 
   const sortedRows = useMemo(() => {
-    if (!diffRows || diffRows.length === 0) return [];
+    if (!diffRows?.length) return [];
     const arr = [...diffRows];
     const { column, direction } = sortConfig;
     if (!column) return arr;
-
     arr.sort((a, b) => {
       const av = (a[column] || "").toString();
       const bv = (b[column] || "").toString();
@@ -131,113 +130,98 @@ function SortableColumnDiffTable({ columnName, pk, diffRows }) {
     return arr;
   }, [diffRows, sortConfig]);
 
-  const handleSort = (col) => {
-    setSortConfig(prev => {
-      if (prev.column === col) {
-        return { column: col, direction: prev.direction === "asc" ? "desc" : "asc" };
-      }
-      return { column: col, direction: "asc" };
-    });
-    setVisibleStart(0);
-  };
+  const handleSort = useCallback((col) => {
+    setSortConfig(prev => ({
+      column: col,
+      direction: prev.column === col && prev.direction === "asc" ? "desc" : "asc"
+    }));
+  }, []);
 
-  const sortIndicator = (col) => {
-    if (sortConfig.column !== col) return "";
-    return sortConfig.direction === "asc" ? " ↑" : " ↓";
-  };
+  const sortIndicator = (col) => sortConfig.column === col
+    ? ` ${sortConfig.direction === "asc" ? "↑" : "↓"}`
+    : "";
 
-  if (!diffRows || diffRows.length === 0) return null;
+  if (!diffRows?.length) return null;
 
-  const total = sortedRows.length;
-  const visibleEnd = Math.min(visibleStart + PAGE_SIZE, total);
-  const windowRows = sortedRows.slice(visibleStart, visibleEnd);
-  const canPrev = visibleStart > 0;
-  const canNext = visibleEnd < total;
+  const totalRows = sortedRows.length;
 
-  const goPrev = () => {
-    if (canPrev) setVisibleStart(Math.max(0, visibleStart - PAGE_SIZE));
-  };
+  const VirtualTable = () => {
+    const [scrollTop, setScrollTop] = useState(0);
 
-  const goNext = () => {
-    if (canNext) setVisibleStart(visibleStart + PAGE_SIZE);
+    const startIndex = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT));
+    const endIndex = Math.min(startIndex + VISIBLE_ROWS + 5, totalRows);
+    const visibleRows = sortedRows.slice(startIndex, endIndex);
+
+    return (
+      <div
+        className="virtual-table-container"
+        style={{ height: '400px', overflow: 'auto' }}
+        ref={tableRef}
+        onScroll={(e) => setScrollTop(e.target.scrollTop)}
+      >
+        <div style={{ height: `${startIndex * ROW_HEIGHT}px` }} />
+        {visibleRows.map((row, idx) => (
+          <div key={startIndex + idx} className="virtual-row" style={{ height: `${ROW_HEIGHT}px` }}>
+            <div className="pk-cell">{row[pk]}</div>
+            <div className="value-cell-a">{row.tableA}</div>
+            <div className="value-cell-b">{row.tableB}</div>
+          </div>
+        ))}
+        <div style={{ height: `${(totalRows - endIndex) * ROW_HEIGHT}px` }} />
+      </div>
+    );
   };
 
   return (
     <div className="column-diff-table">
       <div className="column-diff-header">
         <span className="column-name">{columnName}</span>
-        <span className="diff-count">{diffRows.length} differences</span>
+        <span className="diff-count">{totalRows.toLocaleString()} differences</span>
       </div>
-      <div className="table-wrapper">
-        <table>
-          <thead>
-            <tr>
-              <th className="sortable" onClick={() => handleSort(pk)}>
-                {pk}{sortIndicator(pk)}
-              </th>
-              <th className="sortable" onClick={() => handleSort("tableA")}>
-                Table A{sortIndicator("tableA")}
-              </th>
-              <th className="sortable" onClick={() => handleSort("tableB")}>
-                Table B{sortIndicator("tableB")}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {windowRows.map((row, idx) => (
-              <tr key={visibleStart + idx}>
-                <td className="pk-cell">{row[pk]}</td>
-                <td className="value-cell-a">{row.tableA}</td>
-                <td className="value-cell-b">{row.tableB}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {total > PAGE_SIZE && (
-        <div
-          style={{
-            padding: "8px 12px",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            fontSize: "12px",
-          }}
-        >
-          <span>
-            Showing {visibleStart + 1}–{visibleEnd} of {total.toLocaleString()} rows
-          </span>
-          <div>
-            <button
-              onClick={goPrev}
-              disabled={!canPrev}
-              style={{ marginRight: "8px" }}
-            >
-              Prev
-            </button>
-            <button onClick={goNext} disabled={!canNext}>
-              Next
-            </button>
+
+      <div style={{ background: '#f6f8fa', padding: '12px', borderBottom: '1px solid #e1e4e8' }}>
+        <div style={{ display: 'flex', fontWeight: '600', fontSize: '14px' }}>
+          <div
+            className="sortable"
+            onClick={() => handleSort(pk)}
+            style={{ flex: 1, padding: '8px 12px', cursor: 'pointer', userSelect: 'none' }}
+          >
+            {pk}{sortIndicator(pk)}
+          </div>
+          <div
+            className="sortable"
+            onClick={() => handleSort("tableA")}
+            style={{ flex: 1, padding: '8px 12px', cursor: 'pointer', userSelect: 'none' }}
+          >
+            Table A{sortIndicator("tableA")}
+          </div>
+          <div
+            className="sortable"
+            onClick={() => handleSort("tableB")}
+            style={{ flex: 1, padding: '8px 12px', cursor: 'pointer', userSelect: 'none' }}
+          >
+            Table B{sortIndicator("tableB")}
           </div>
         </div>
-      )}
+      </div>
+
+      <VirtualTable />
     </div>
   );
 }
 
+// ✅ VIRTUALIZED MISSING ROWS TABLE
 function SortableMissingTable({ title, rows, pk, headers }) {
   const [sortConfig, setSortConfig] = useState({ column: pk, direction: "asc" });
-
-  const [visibleStart, setVisibleStart] = useState(0);
-  const PAGE_SIZE = 200;
+  const tableRef = useRef(null);
+  const ROW_HEIGHT = 35;
+  const VISIBLE_ROWS = 15;
 
   const sortedRows = useMemo(() => {
-    if (!rows || rows.length === 0) return [];
-
+    if (!rows?.length) return [];
     const arr = [...rows];
     const { column, direction } = sortConfig;
     if (!column) return arr;
-
     arr.sort((a, b) => {
       const av = (a[column] ?? "").toString();
       const bv = (b[column] ?? "").toString();
@@ -245,107 +229,82 @@ function SortableMissingTable({ title, rows, pk, headers }) {
       if (av > bv) return direction === "asc" ? 1 : -1;
       return 0;
     });
-
     return arr;
   }, [rows, sortConfig]);
 
-  const handleSort = (col) => {
+  const handleSort = useCallback((col) => {
     setSortConfig(prev => ({
       column: col,
       direction: prev.column === col && prev.direction === "asc" ? "desc" : "asc"
     }));
-    setVisibleStart(0);
-  };
+  }, []);
 
-  const sortIndicator = (col) =>
-    sortConfig.column === col ? ` ${sortConfig.direction === "asc" ? "↑" : "↓"}` : "";
+  const sortIndicator = (col) => sortConfig.column === col
+    ? ` ${sortConfig.direction === "asc" ? "↑" : "↓"}`
+    : "";
 
-  if (!rows || rows.length === 0) return null;
+  if (!rows?.length) return null;
 
-  const total = sortedRows.length;
-  const visibleEnd = Math.min(visibleStart + PAGE_SIZE, total);
-  const windowRows = sortedRows.slice(visibleStart, visibleEnd);
-  const canPrev = visibleStart > 0;
-  const canNext = visibleEnd < total;
+  const totalRows = sortedRows.length;
 
-  const goPrev = () => {
-    if (canPrev) setVisibleStart(Math.max(0, visibleStart - PAGE_SIZE));
-  };
+  const VirtualTable = () => {
+    const [scrollTop, setScrollTop] = useState(0);
 
-  const goNext = () => {
-    if (canNext) setVisibleStart(visibleStart + PAGE_SIZE);
+    const startIndex = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT));
+    const endIndex = Math.min(startIndex + VISIBLE_ROWS + 5, totalRows);
+    const visibleRows = sortedRows.slice(startIndex, endIndex);
+
+    return (
+      <div
+        className="virtual-table-container"
+        style={{ height: '400px', overflow: 'auto' }}
+        ref={tableRef}
+        onScroll={(e) => setScrollTop(e.target.scrollTop)}
+      >
+        <div style={{ height: `${startIndex * ROW_HEIGHT}px` }} />
+        {visibleRows.map((row, idx) => (
+          <div key={startIndex + idx} className="virtual-row-wide" style={{ height: `${ROW_HEIGHT}px` }}>
+            {headers.map(col => (
+              <div key={col} className="table-cell" style={{ minWidth: '120px' }}>
+                {row[col] || '(empty)'}
+              </div>
+            ))}
+          </div>
+        ))}
+        <div style={{ height: `${(totalRows - endIndex) * ROW_HEIGHT}px` }} />
+      </div>
+    );
   };
 
   return (
     <div className="table-container">
       <div className="table-header">
-        {title} ({rows.length.toLocaleString()} rows)
+        {title} ({totalRows.toLocaleString()} rows)
         <span className="column-count">{headers.length} columns</span>
       </div>
 
-      <div className="table-scroll-wrapper">
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                {headers.map(col => (
-                  <th
-                    key={col}
-                    className="sortable"
-                    onClick={() => handleSort(col)}
-                    style={{ minWidth: Math.max(120, col.length * 10 + 40) + 'px' }}
-                  >
-                    {col}{sortIndicator(col)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {windowRows.map((row, idx) => (
-                <tr key={visibleStart + idx}>
-                  {headers.map(col => (
-                    <td key={col} style={{ minWidth: '120px' }}>
-                      {row[col] || '(empty)'}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="scroll-indicator">
-          {headers.length > 8 && `← Scroll horizontally to see all ${headers.length} columns →`}
+      <div style={{ background: '#f6f8fa', padding: '12px', borderBottom: '1px solid #e1e4e8' }}>
+        <div style={{ display: 'flex', fontWeight: '600', fontSize: '14px', overflowX: 'auto' }}>
+          {headers.map(col => (
+            <div
+              key={col}
+              className="sortable"
+              onClick={() => handleSort(col)}
+              style={{
+                minWidth: Math.max(120, col.length * 8 + 40),
+                padding: '8px 12px',
+                cursor: 'pointer',
+                userSelect: 'none',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {col}{sortIndicator(col)}
+            </div>
+          ))}
         </div>
       </div>
 
-      {total > PAGE_SIZE && (
-        <div
-          style={{
-            padding: "8px 12px",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            fontSize: "12px",
-          }}
-        >
-          <span>
-            Showing {visibleStart + 1}–{visibleEnd} of {total.toLocaleString()} rows
-          </span>
-          <div>
-            <button
-              onClick={goPrev}
-              disabled={!canPrev}
-              style={{ marginRight: "8px" }}
-            >
-              Prev
-            </button>
-            <button onClick={goNext} disabled={!canNext}>
-              Next
-            </button>
-          </div>
-        </div>
-      )}
+      <VirtualTable />
     </div>
   );
 }
@@ -411,74 +370,50 @@ function App() {
     setLoading(true);
 
     try {
-      // FIXED: Proper full-width container
       const container = document.createElement('div');
       container.id = 'pdf-container';
       container.style.cssText = `
-        position: absolute;
-        left: -9999px;
-        top: 0;
-        width: 1200px !important;
-        padding: 30px !important;
-        background: #f5f7fa !important;
-        font-family: inherit !important;
-        box-sizing: border-box !important;
+        position: absolute; left: -9999px; top: 0; width: 1200px !important;
+        padding: 30px !important; background: #f5f7fa !important;
+        font-family: inherit !important; box-sizing: border-box !important;
       `;
       document.body.appendChild(container);
 
-      // Clone with full data visible
       const appContent = document.querySelector('.app-container');
       const clone = appContent.cloneNode(true);
 
-      // FIXED: Force dropdown to show selected PK value
       const pkSelect = clone.querySelector('select');
-      if (pkSelect && pk) {
-        pkSelect.value = pk;
-      }
+      if (pkSelect && pk) pkSelect.value = pk;
 
-      // CRITICAL: Force all tables to show full content (within current window)
-      clone.querySelectorAll('.table-wrapper').forEach(wrapper => {
+      clone.querySelectorAll('.virtual-table-container, .table-wrapper').forEach(wrapper => {
         wrapper.style.maxHeight = 'none !important';
         wrapper.style.overflow = 'visible !important';
         wrapper.style.height = 'auto !important';
       });
 
-      // Disable interactions only
       clone.querySelectorAll('input, select, button').forEach(el => {
         el.style.pointerEvents = 'none';
       });
 
       container.appendChild(clone);
-
-      // Wait for layout
       await new Promise(r => setTimeout(r, 100));
 
       const html2canvas = (await import('html2canvas')).default;
       const canvas = await html2canvas(container, {
-        scale: 1.2,  // Perfect balance
-        useCORS: true,
-        allowTaint: true,
-        logging: false,
-        backgroundColor: null,  // Use page background
-        width: 1200,
-        height: Math.max(container.scrollHeight, 800),
-        scrollX: 0,
-        scrollY: 0
+        scale: 1.2, useCORS: true, allowTaint: true, logging: false,
+        backgroundColor: null, width: 1200,
+        height: Math.max(container.scrollHeight, 800)
       });
 
-      // Optimized PDF
       const imgData = canvas.toDataURL('image/jpeg', 0.9);
       const pdf = new jsPDF('p', 'mm', 'a4');
-
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = pdf.internal.pageSize.getHeight();
       const imgProps = pdf.getImageProperties(imgData);
       const pdfImgWidth = pdfWidth;
       const pdfImgHeight = (imgProps.height * pdfWidth) / imgProps.width;
 
-      let heightLeft = pdfImgHeight;
-      let position = 0;
-
+      let heightLeft = pdfImgHeight, position = 0;
       pdf.addImage(imgData, 'JPEG', 0, position, pdfImgWidth, pdfImgHeight);
       heightLeft -= pdfHeight;
 
@@ -544,12 +479,15 @@ function App() {
           <div className="summary-card">
             <div className="summary-label">PK Matching</div>
             <div className="summary-value">{matchingCount} matched</div>
-            <div className="summary-subtext">Missing: {missingRows.onlyInA.length} | Extra: {missingRows.onlyInB.length}</div>
+            <div className="summary-subtext">
+              Missing: {missingRows.onlyInA.length} | Extra: {missingRows.onlyInB.length}
+            </div>
           </div>
           <div className="summary-card">
             <div className="summary-label">Columns</div>
             <div className={columnDiffs.identical ? "summary-value-success" : "summary-value-warning"}>
-              {columnDiffs.identical ? "Identical" : `${columnDiffs.onlyA.length} missing, ${columnDiffs.onlyB.length} extra`}
+              {columnDiffs.identical ? "Identical" :
+                `${columnDiffs.onlyA.length} missing, ${columnDiffs.onlyB.length} extra`}
             </div>
           </div>
           <div className="summary-card">
